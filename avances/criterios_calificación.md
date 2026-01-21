@@ -1,0 +1,11 @@
+- Implementación de funciones de orden superior (anónimas y nombradas).
+- Uso de funciones como: Map, Filter, FlatMap, Count, FoldLeft, etc.
+- Uso de estándares de programación para nombrar valores, funciones, case class, etc.
+- Legibilidad del código, uso de espacios, tabulaciones, comentarios en el código.
+- Implementación de diferentes tipos de consultas SQL usando Scala.
+- Creatividad en el diseño de la solución de las tareas (Análisis exploratorio, SQL desde Scala, Explotación de datos).
+- Organización de la solución en repositorio (modelos, utilidades, data, etc.).
+- Documentación técnica del proceso en repositorio WIKI/README (descripción de datos, lectura de CSV, análisis exploratorio, limpieza, trabajo con base de datos).
+- En el momento de la defensa (presentación):
+- Uso del lenguaje técnico para realizar las explicaciones.
+- Explicación detallada de las implementaciones.
