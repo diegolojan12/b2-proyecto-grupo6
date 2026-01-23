@@ -1016,3 +1016,403 @@ Archivo guardado en: src/main/resources/data/pi-movies-complete-2025-12-04-limpi
 
 
 ```
+
+#Avance 3
+— Conexión a Base de Datos e Inyección/Carga de Datos
+
+Proyecto: **LimpiezaCrewCirce** (Scala 3 + Doobie + MySQL)
+
+Este README está enfocado **exclusivamente** en:
+- Conexión a MySQL (configuración + transactor en Doobie).
+- Creación de esquema (tabla `movies_clean`).
+- Inyección / carga de datos (INSERT parametrizado, carga por lotes).
+- Generación de evidencia SQL (`movies_clean.sql`).
+
+> Nota: Se explica de forma **didáctica** y **práctica**, sin meterse a detalle extremo de cada columna.
+
+## Índice
+
+1. 1. Estructura rápida del proyecto (solo BD)
+2. 2. Dependencias y librerías relacionadas a BD
+3. 3. Configuración de conexión (application.conf)
+4. 4. AppConfig.scala — lectura centralizada de configuración
+5. 5. Database.scala — creación del Transactor
+6. 6. Schema.scala — DDL y limpieza de tabla
+7. 7. MovieEtlToDb.scala — carga a BD (inyección de datos)
+8. 8. EtlCompleto.scala — cómo se dispara la carga
+9. 9. ConsultaEstadisticas.scala — consultas para validar la carga
+10. 10. Cómo ejecutar la carga (pasos recomendados)
+11. 11. Parámetros importantes (batchSize / recargarDesdeCero)
+12. 12. Buenas prácticas incluidas (y por qué importan)
+13. 13. Errores comunes y solución rápida
+14. 14. Glosario Doobie/Cats Effect (mini)
+15. 15. FAQ
+16. 16. Apéndice A: flujo ETL→BD (diagrama)
+17. 17. Apéndice B: checklist para entregar el proyecto
+18. 18. Walkthrough por archivo
+19. 19. Troubleshooting extendido
+20. 20. Cómo adaptar esta capa BD a otro proyecto
+21. 21. Nota de seguridad (credenciales)
+22. 22. Notas rápidas
+23. 23. Apéndice C: líneas de apoyo
+
+## 1) Estructura rápida del proyecto (solo BD)
+
+Archivos clave para la conexión e inserción:
+
+- `src/main/resources/application.conf`
+  - Define driver, url, user y password de MySQL.
+- `src/main/scala/config/AppConfig.scala`
+  - Lee el `.conf` y expone las propiedades de BD.
+- `src/main/scala/config/Database.scala`
+  - Crea el **Transactor** (Doobie) para ejecutar SQL.
+- `src/main/scala/db/Schema.scala`
+  - DDL para crear la tabla `movies_clean` y limpiar datos.
+- `src/main/scala/etl/MovieEtlToDb.scala`
+  - Inserta datos en BD por lotes y genera script SQL.
+- `src/main/scala/etl/EtlCompleto.scala`
+  - Pipeline completo, termina llamando la carga a BD.
+- `src/main/scala/etl/ConsultaEstadisticas.scala`
+  - Consultas SELECT para validar que la tabla tiene datos.
+
+Ruta recomendada de lectura para entender la BD:
+1) `application.conf`
+2) `AppConfig.scala`
+3) `Database.scala`
+4) `MovieEtlToDb.scala`
+
+## 2) Dependencias y librerías relacionadas a BD
+
+Archivo: `build.sbt`
+
+Dependencias relevantes:
+- `org.tpolecat::doobie-core` → SQL tipado, `ConnectionIO`, `Transactor`.
+- `org.tpolecat::doobie-hikari` → pool de conexiones (soporte, aunque aquí se usa DriverManager).
+- `com.mysql::mysql-connector-j` → driver JDBC de MySQL.
+- `com.typesafe::config` → lectura de `application.conf`.
+- `org.slf4j::slf4j-simple` → logging simple (en el proyecto se apaga/ajusta por config).
+
+Idea principal:
+- Doobie genera programas `ConnectionIO` (SQL descriptivo).
+- El Transactor los ejecuta en MySQL usando JDBC.
+
+## 3) Configuración de conexión (application.conf)
+
+Archivo: `src/main/resources/application.conf`
+
+Ejemplo (con password en placeholder):
+
+```hocon
+org.slf4j.simpleLogger.defaultLogLevel = "OFF"
+
+db {
+  driver = "com.mysql.cj.jdbc.Driver"
+  url = "jdbc:mysql://localhost:3306/my_db"
+  user = "root"
+  password = "<tu_password>"
+}
+```
+
+Qué significa cada campo:
+- `driver`: clase del driver JDBC (MySQL Connector/J).
+- `url`: URL JDBC con host/puerto y nombre de base de datos.
+- `user`: usuario de MySQL.
+- `password`: contraseña del usuario.
+
+Sugerencia:
+- Si mueves la BD, normalmente solo cambias la `url`.
+
+## 4) AppConfig.scala — lectura centralizada de configuración
+
+Archivo: `src/main/scala/config/AppConfig.scala`
+
+Responsabilidad del archivo:
+- Cargar el archivo de configuración (`application.conf`).
+- Exponer valores de conexión en un solo lugar.
+- Configurar logging de `slf4j-simple` usando `System.setProperty`.
+
+Componentes internos:
+- `root = ConfigFactory.load()`
+- `initLogging()`
+- `object db { driver, url, user, password }`
+
+Beneficios:
+- Configuración sin duplicación.
+- Menos riesgo de errores por copiar/pegar.
+- Fácil cambio de entorno.
+
+## 5) Database.scala — creación del Transactor
+
+Archivo: `src/main/scala/config/Database.scala`
+
+Concepto clave: **Transactor**
+- Es el puente entre `ConnectionIO` y la BD real (MySQL).
+- Usa JDBC para abrir conexiones.
+- Permite ejecutar SQL con `.transact(xa)`.
+
+Qué expone `Database`:
+- `init()` → inicializa logging (llama `AppConfig.initLogging()`).
+- `transactor: Resource[IO, Transactor[IO]]` → crea el transactor.
+
+Por qué `Resource`:
+- Manejo seguro del ciclo de vida del recurso.
+- Evita fugas de conexiones.
+
+Patrón de uso típico:
+```scala
+Database.init()
+Database.transactor.use { xa =>
+  // program: ConnectionIO[A]
+  // program.transact(xa): IO[A]
+}
+```
+
+Detalle de implementación (alto nivel):
+- Se construye `Properties()` con `user` y `password`.
+- Se usa `Transactor.fromDriverManager[IO](driver, url, props, logHandler=None)`.
+
+## 6) Schema.scala — DDL y limpieza de tabla
+
+Archivo: `src/main/scala/db/Schema.scala`
+
+Incluye:
+- `createMoviesClean: Update0` → `CREATE TABLE IF NOT EXISTS movies_clean (...)`
+- `truncateMoviesClean: Update0` → `DELETE FROM movies_clean`
+
+Notas:
+- `Update0` es un update sin parámetros.
+- `CREATE TABLE IF NOT EXISTS` permite correr el ETL aunque la tabla no exista.
+- `DELETE FROM` limpia para recargar desde cero.
+
+## 7) MovieEtlToDb.scala — carga a BD (inyección de datos)
+
+Archivo: `src/main/scala/etl/MovieEtlToDb.scala`
+
+Este módulo implementa:
+- DDL local (crear/limpiar tabla).
+- INSERT parametrizado.
+- Inserción por lotes (batching).
+- Generación de script SQL (evidencia).
+
+### 7.1 Modelo interno: `MovieDbRow`
+- Es un `case class` privado con tipos compatibles con MySQL.
+- Sirve como “contrato” de inserción.
+- Evita problemas de tipos en runtime.
+
+### 7.2 Conversión `toDbRow(m: Movie)`
+- Convierte `Movie` a `MovieDbRow`.
+- Asegura conversiones a `Long` e `Int` donde corresponde.
+- Mapea el ROI desde ``m.`return``.
+
+### 7.3 DDL interno del módulo
+- `createTable` crea `movies_clean` si no existe.
+- `truncateTable` ejecuta `DELETE FROM movies_clean`.
+- Esto vuelve al módulo autónomo (se puede usar sin Schema.scala).
+
+### 7.4 INSERT parametrizado `insertMany: Update[MovieDbRow]`
+- Define SQL con `?` placeholders.
+- Doobie hace el binding de parámetros.
+- Evita concatenación de strings en inserción real.
+
+### 7.5 Inserción masiva (`updateMany`) — inyección/carga
+Flujo resumido en `cargarEnDb`:
+- `rows = movies.map(toDbRow)`
+- `chunks = rows.grouped(batchSize).toList`
+- `createTable.run`
+- si `recargarDesdeCero` → `truncateTable.run`
+- por cada chunk → `insertMany.updateMany(chunk)`
+- se suma el total insertado y se imprime al final.
+
+### 7.6 Evidencia SQL (`generarSqlScript` y `guardarSql`)
+- Se genera DDL + INSERTs como texto.
+- Se aplica escapado básico de strings para no romper el SQL.
+- Se guarda como UTF-8 creando carpetas si faltan.
+
+### 7.7 `exportarYSubir`
+- Genera script SQL.
+- Lo guarda en disco.
+- Luego ejecuta `cargarEnDb`.
+
+## 8) EtlCompleto.scala — cómo se dispara la carga
+
+Archivo: `src/main/scala/etl/EtlCompleto.scala`
+
+En lo relacionado a BD:
+- Produce `List[Movie]` (limpios).
+- Guarda evidencia SQL en `src/main/resources/sql/movies_clean.sql`.
+- Llama a la carga en MySQL con `MovieEtlToDb.cargarEnDb(...)`.
+
+## 9) ConsultaEstadisticas.scala — consultas para validar la carga
+
+Archivo: `src/main/scala/etl/ConsultaEstadisticas.scala`
+
+Sirve para validar:
+- Conexión correcta.
+- Tabla creada.
+- Datos insertados.
+
+Patrón usado:
+- `Database.init()`
+- `Database.transactor.use { xa => ... }`
+- Consultas `sql"...".query[...]` y ejecución con `.transact(xa)`.
+
+## 10) Cómo ejecutar la carga (pasos recomendados)
+
+### 10.1 Requisitos
+- MySQL corriendo.
+- BD creada (ej. `my_db`).
+- Credenciales correctas en `application.conf`.
+
+### 10.2 Ejecución recomendada
+- Ejecuta `etl.EtlCompleto` (carga completa).
+- Luego ejecuta `etl.ConsultaEstadisticas` (validación).
+
+## 11) Parámetros importantes (batchSize / recargarDesdeCero)
+
+### 11.1 `batchSize`
+- Tamaño del lote de inserción.
+- Default: `2000`.
+- Ajusta según rendimiento.
+
+### 11.2 `recargarDesdeCero`
+- Si `true`, se limpia tabla antes de insertar.
+- Si `false`, se inserta sin borrar lo anterior.
+
+## 12) Buenas prácticas incluidas (y por qué importan)
+
+- SQL parametrizado (más seguro y robusto).
+- Manejo de recursos con `Resource`.
+- Inserción por lotes (rendimiento).
+- Config centralizada (mantenibilidad).
+- Evidencia SQL (auditabilidad/entrega).
+
+## 13) Errores comunes y solución rápida
+
+### 13.1 Error de conexión
+- Verifica MySQL encendido.
+- Revisa `application.conf` (URL, usuario, contraseña).
+- Asegura que la BD existe.
+
+### 13.2 Error de tabla inexistente
+- Ejecuta el ETL para que corra `CREATE TABLE IF NOT EXISTS`.
+
+### 13.3 Duplicados
+- Usa `recargarDesdeCero = true`.
+
+### 13.4 Carga lenta
+- Ajusta `batchSize`.
+- Revisa recursos de MySQL/PC.
+
+## 14) Glosario Doobie/Cats Effect (mini)
+
+- `IO[A]`: efecto que produce A al ejecutarse.
+- `ConnectionIO[A]`: programa de BD (aún no ejecutado).
+- `Transactor`: ejecuta el programa en la BD.
+- `transact(xa)`: corre el programa contra MySQL.
+- `Update0`: update sin parámetros.
+- `Update[A]`: update parametrizado.
+- `updateMany`: inserción/actualización masiva.
+
+## 15) FAQ
+
+### 15.1 ¿Por qué también se genera un `.sql` si ya insertamos con Doobie?
+- Para evidencia, revisión, o ejecución manual si la BD no está disponible en evaluación.
+
+### 15.2 ¿Puedo cargar sin borrar datos?
+- Sí, `recargarDesdeCero = false`.
+
+### 15.3 ¿Cómo cambio de BD?
+- Cambia la URL en `application.conf`.
+
+## 16) Apéndice A: flujo ETL→BD (diagrama)
+
+```text
+CSV sucio
+  |
+  v
+Lectura + parse
+  |
+  v
+Transformación/Limpieza -> List[Movie]
+  |
+  +-----------------------+
+  |                       |
+  v                       v
+SQL evidencia (.sql)      Carga a MySQL (Doobie)
+  |                       |
+  v                       v
+Archivo generado          Tabla movies_clean
+          |
+          v
+  Validación (SELECTs)
+```
+
+## 17) Apéndice B: checklist para entregar el proyecto
+
+- [ ] El proyecto compila.
+- [ ] MySQL está activo.
+- [ ] La base `my_db` existe.
+- [ ] `application.conf` correcto.
+- [ ] Se ejecuta `EtlCompleto`.
+- [ ] Se genera `movies_clean.sql`.
+- [ ] Se insertan filas (mensaje final).
+- [ ] Se ejecuta `ConsultaEstadisticas` con resultados.
+
+## 18) Walkthrough por archivo
+
+### 18.1 `application.conf`
+- Parametriza la conexión (driver, url, user, password).
+- Controla el nivel de logs.
+
+### 18.2 `AppConfig.scala`
+- Lee config una vez y expone accesos simples.
+- Ajusta logging para slf4j-simple.
+
+### 18.3 `Database.scala`
+- Construye `Transactor` usando DriverManager.
+- Lo expone como `Resource` para uso seguro.
+
+### 18.4 `Schema.scala`
+- DDL y limpieza (create + delete).
+
+### 18.5 `MovieEtlToDb.scala`
+- Inserción parametrizada y por lotes.
+- Generación de evidencia SQL.
+
+## 19) Troubleshooting extendido
+
+### 19.1 Si no conecta
+- Confirma host/puerto.
+- Confirma DB name en la URL.
+- Confirma usuario/clave.
+- Confirma driver en dependencias.
+
+### 19.2 Si inserta 0 filas
+- Revisa si la lista `movies` está vacía.
+- Revisa si el CSV se leyó bien.
+
+### 19.3 Si el script SQL se genera pero la BD no se llena
+- Verifica que `cargarEnDb` se esté ejecutando.
+- Verifica que no se esté conectando a otra BD por URL distinta.
+
+## 20) Cómo adaptar esta capa BD a otro proyecto
+
+Pasos:
+- Copia `application.conf`, `AppConfig.scala`, `Database.scala`.
+- Define tu propio `Schema.scala` y `Row` interno.
+- Crea `Update[Row]` con placeholders `?`.
+- Implementa batching con `.grouped(batchSize)` + `.updateMany`.
+
+## 21) Nota de seguridad (credenciales)
+
+- Evita subir contraseñas reales a repos públicos.
+- Para proyectos reales usa variables de entorno o secretos.
+
+## 22) Notas rápidas
+
+- El Transactor ejecuta el SQL real.
+- `ConnectionIO` describe; `transact` ejecuta.
+- SQL parametrizado = más seguro.
+- Batching = más rápido.
+- Si hay duplicados, recarga desde cero.
+- Si la carga es lenta, ajusta batchSize.
