@@ -12,8 +12,55 @@ import config.Database
 object ModeloNormalizadoEtl {
 
   // ============================================================================
-  // PASO 1: CREAR TODAS LAS TABLAS (sin cambios)
+  // PASO 1: CREAR TODAS LAS TABLAS - SOLO CAMPOS DEL JSON
   // ============================================================================
+
+  val createCastMembers: Update0 =
+    sql"""
+      CREATE TABLE IF NOT EXISTS cast_members (
+        cast_id BIGINT PRIMARY KEY,
+        character_name LONGTEXT,
+        credit_id VARCHAR(100),
+        gender INT,
+        name LONGTEXT,
+        cast_order INT,
+        profile_path LONGTEXT
+      ) ENGINE=InnoDB
+    """.update
+
+  val createCrewMembers: Update0 =
+    sql"""
+      CREATE TABLE IF NOT EXISTS crew_members (
+        credit_id VARCHAR(100) PRIMARY KEY,
+        department LONGTEXT,
+        gender INT,
+        job LONGTEXT,
+        name LONGTEXT,
+        profile_path LONGTEXT
+      ) ENGINE=InnoDB
+    """.update
+
+  val createMovieCast: Update0 =
+    sql"""
+      CREATE TABLE IF NOT EXISTS movie_cast (
+        movie_id BIGINT NOT NULL,
+        cast_id BIGINT NOT NULL,
+        PRIMARY KEY (movie_id, cast_id),
+        FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+        FOREIGN KEY (cast_id) REFERENCES cast_members(cast_id) ON DELETE RESTRICT
+      ) ENGINE=InnoDB
+    """.update
+
+  val createMovieCrew: Update0 =
+    sql"""
+      CREATE TABLE IF NOT EXISTS movie_crew (
+        movie_id BIGINT NOT NULL,
+        credit_id VARCHAR(100) NOT NULL,
+        PRIMARY KEY (movie_id, credit_id),
+        FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+        FOREIGN KEY (credit_id) REFERENCES crew_members(credit_id) ON DELETE RESTRICT
+      ) ENGINE=InnoDB
+    """.update
 
   val createCollections: Update0 =
     sql"""
@@ -161,16 +208,18 @@ object ModeloNormalizadoEtl {
     """.update
 
   // ============================================================================
-  // PASO 2: PARSEAR JSON DE MOVIES (CORREGIDO)
+  // PASO 2: PARSEAR JSON
   // ============================================================================
 
-  // Helper para limpiar JSON antes de parsear
   def cleanJson(json: String): String = {
     json.trim
       .replaceAll("'", "\"")
       .replaceAll("None", "null")
       .replaceAll("True", "true")
       .replaceAll("False", "false")
+      .replaceAll("""\\x[0-9a-fA-F]{2}""", "") // ← NUEVO
+      .replaceAll("""[\u0000-\u001F]""", "") // ← NUEVO
+      .replaceAll("[\r\n]+", " ") // ← NUEVO
   }
 
   def parseCollection(json: String): Option[Collection] = {
@@ -221,8 +270,32 @@ object ModeloNormalizadoEtl {
     }
   }
 
+  def parseCast(json: String): List[CastMember] = {
+    if (json.trim.isEmpty || json == "[]" || json == "{}") Nil
+    else {
+      try {
+        val cleaned = cleanJson(json)
+        decode[List[CastMember]](cleaned).getOrElse(Nil)
+      } catch {
+        case _: Exception => Nil
+      }
+    }
+  }
+
+  def parseCrew(json: String): List[CrewMember] = {
+    if (json.trim.isEmpty || json == "[]" || json == "{}") Nil
+    else {
+      try {
+        val cleaned = cleanJson(json)
+        decode[List[CrewMember]](cleaned).getOrElse(Nil)
+      } catch {
+        case _: Exception => Nil
+      }
+    }
+  }
+
   // ============================================================================
-  // PASO 3: INSERTAR DATOS EN TABLAS CATÁLOGO
+  // PASO 3: INSERTAR DATOS - SOLO CAMPOS DEL JSON
   // ============================================================================
 
   def insertCollection(c: Collection): ConnectionIO[Int] =
@@ -285,6 +358,45 @@ object ModeloNormalizadoEtl {
       case None => 0.pure[ConnectionIO]
     }
 
+  def insertCastMember(c: CastMember): ConnectionIO[Int] =
+    c.cast_id match {
+      case Some(castId) =>
+        sql"""
+          INSERT IGNORE INTO cast_members (
+            cast_id, character_name, credit_id, gender, name, cast_order, profile_path
+          )
+          VALUES (
+            ${castId},
+            ${c.character.getOrElse("")},
+            ${c.credit_id.getOrElse("")},
+            ${c.gender.getOrElse(0)},
+            ${c.name.getOrElse("")},
+            ${c.order.getOrElse(0)},
+            ${c.profile_path.getOrElse("")}
+          )
+        """.update.run
+      case None => 0.pure[ConnectionIO]
+    }
+
+  def insertCrewMember(c: CrewMember): ConnectionIO[Int] =
+    c.credit_id match {
+      case Some(creditId) =>
+        sql"""
+          INSERT IGNORE INTO crew_members (
+            credit_id, department, gender, job, name, profile_path
+          )
+          VALUES (
+            ${creditId},
+            ${c.department.getOrElse("")},
+            ${c.gender.getOrElse(0)},
+            ${c.job.getOrElse("")},
+            ${c.name.getOrElse("")},
+            ${c.profile_path.getOrElse("")}
+          )
+        """.update.run
+      case None => 0.pure[ConnectionIO]
+    }
+
   // ============================================================================
   // PASO 4: INSERTAR PELÍCULA Y RELACIONES
   // ============================================================================
@@ -324,20 +436,27 @@ object ModeloNormalizadoEtl {
   def linkMovieKeyword(movieId: Long, keywordId: Long): ConnectionIO[Int] =
     sql"INSERT IGNORE INTO movie_keywords (movie_id, keyword_id) VALUES ($movieId, $keywordId)".update.run
 
+  def linkMovieCast(movieId: Long, castId: Long): ConnectionIO[Int] =
+    sql"INSERT IGNORE INTO movie_cast (movie_id, cast_id) VALUES ($movieId, $castId)".update.run
+
+  def linkMovieCrew(movieId: Long, creditId: String): ConnectionIO[Int] =
+    sql"INSERT IGNORE INTO movie_crew (movie_id, credit_id) VALUES ($movieId, $creditId)".update.run
+
   // ============================================================================
-  // PASO 5: PROCESO COMPLETO POR PELÍCULA (CORREGIDO)
+  // PASO 5: PROCESO COMPLETO POR PELÍCULA
   // ============================================================================
 
   def procesarPelicula(m: Movie): ConnectionIO[Unit] = {
     val movieId = m.id.toLong
 
-    // ✅ CORRECCIÓN: Usar los campos correctos del modelo Movie
     val collection = parseCollection(m.belongs_to_collection)
     val genres = parseGenres(m.genres)
     val companies = parseProductionCompanies(m.production_companies)
     val countries = parseProductionCountries(m.production_countries)
     val languages = parseSpokenLanguages(m.spoken_languages)
-    val keywords: List[Keyword] = Nil // O parseKeywords(m.keywords) si existe
+    val keywords = parseKeywords(m.keywords)
+    val cast = parseCast(m.cast)
+    val crew = parseCrew(m.crew)
 
     for {
       _ <- insertMovie(m)
@@ -349,6 +468,8 @@ object ModeloNormalizadoEtl {
       _ <- countries.traverse(insertProductionCountry)
       _ <- languages.traverse(insertSpokenLanguage)
       _ <- keywords.traverse(insertKeyword)
+      _ <- cast.traverse(insertCastMember)
+      _ <- crew.traverse(insertCrewMember)
 
       // Crear relaciones
       _ <- collection.traverse(c => c.id.traverse(linkMovieCollection(movieId, _)))
@@ -357,10 +478,11 @@ object ModeloNormalizadoEtl {
       _ <- countries.traverse(c => c.iso_3166_1.traverse(linkMovieCountry(movieId, _)))
       _ <- languages.traverse(l => l.iso_639_1.traverse(linkMovieLanguage(movieId, _)))
       _ <- keywords.traverse(k => k.id.traverse(linkMovieKeyword(movieId, _)))
+      _ <- cast.traverse(c => c.cast_id.traverse(id => linkMovieCast(movieId, id)))
+      _ <- crew.traverse(c => c.credit_id.traverse(linkMovieCrew(movieId, _)))
     } yield ()
   }
 
-  // Nueva función con logging para debug
   def procesarPeliculaConLog(m: Movie, idx: Int): ConnectionIO[Unit] = {
     val movieId = m.id.toLong
 
@@ -369,8 +491,10 @@ object ModeloNormalizadoEtl {
     val companies = parseProductionCompanies(m.production_companies)
     val countries = parseProductionCountries(m.production_countries)
     val languages = parseSpokenLanguages(m.spoken_languages)
+    val keywords = parseKeywords(m.keywords)
+    val cast = parseCast(m.cast)
+    val crew = parseCrew(m.crew)
 
-    // Log solo para las primeras 3 películas
     if (idx < 3) {
       FC.delay {
         println(s"\n[DEBUG] Película #$idx: ${m.title}")
@@ -379,8 +503,14 @@ object ModeloNormalizadoEtl {
         println(s"  - Companies: ${companies.size} items")
         println(s"  - Countries: ${countries.size} items")
         println(s"  - Languages: ${languages.size} items")
-        if (genres.nonEmpty) {
-          println(s"    Ejemplo genre: ${genres.head.name.getOrElse("N/A")}")
+        println(s"  - Keywords: ${keywords.size} items")
+        println(s"  - Cast: ${cast.size} items")
+        println(s"  - Crew: ${crew.size} items")
+        if (cast.nonEmpty) {
+          println(s"    Ejemplo cast: ${cast.head.name.getOrElse("N/A")} como ${cast.head.character.getOrElse("N/A")}")
+        }
+        if (crew.nonEmpty) {
+          println(s"    Ejemplo crew: ${crew.head.name.getOrElse("N/A")} - ${crew.head.job.getOrElse("N/A")}")
         }
       } *> procesarPelicula(m)
     } else {
@@ -396,13 +526,15 @@ object ModeloNormalizadoEtl {
     Database.init()
     Database.transactor.use { xa =>
       val program = for {
-        // Crear tablas
+        // Crear tablas catálogo
         _ <- createCollections.run
         _ <- createGenres.run
         _ <- createProductionCompanies.run
         _ <- createProductionCountries.run
         _ <- createSpokenLanguages.run
         _ <- createKeywords.run
+        _ <- createCastMembers.run
+        _ <- createCrewMembers.run
         _ <- createMovies.run
 
         // Crear tablas puente
@@ -412,8 +544,10 @@ object ModeloNormalizadoEtl {
         _ <- createMovieSpokenLanguages.run
         _ <- createMovieCollections.run
         _ <- createMovieKeywords.run
+        _ <- createMovieCast.run
+        _ <- createMovieCrew.run
 
-        // Procesar películas en lotes (CON LOGGING)
+        // Procesar películas en lotes
         _ <- movies.zipWithIndex.grouped(100).toList.traverse_ { batch =>
           batch.traverse_ { case (movie, idx) => procesarPeliculaConLog(movie, idx) } *>
             FC.delay(print("."))

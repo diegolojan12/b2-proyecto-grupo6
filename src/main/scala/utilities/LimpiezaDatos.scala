@@ -15,6 +15,11 @@ object LimpiezaDatos extends IOApp.Simple:
 
   val filePath = Path("src/main/resources/data/pi-movies-complete-2026-01-08.csv")
 
+  def reportarFechasFaltantes(peliculas: List[Movie]): IO[Unit] =
+    val faltantes = peliculas.count(_.release_date == "null")
+    val porcentaje = faltantes * 100.0 / peliculas.length
+    IO.println(f"  Fechas faltantes:          $faltantes%,d ($porcentaje%.2f%%)")
+
   def run: IO[Unit] =
     val lecturaCSV: IO[List[Movie]] = Files[IO]
       .readAll(filePath)
@@ -78,6 +83,7 @@ object LimpiezaDatos extends IOApp.Simple:
         IO.println("              REPORTE DE LIMPIEZA DE DATOS - DATASET DE PELÍCULAS") >>
         IO.println("=" * 90) >>
         IO.println("") >>
+        reportarFechasFaltantes(peliculasOriginales) >>
         IO.println("1. ANÁLISIS DE CALIDAD DE DATOS (Valores Nulos, Ceros y Vacíos)") >>
         IO.println("-" * 90) >>
         IO.println(f"Columna           Total    Nulos    Ceros    Negativos  Vacíos   Válidos") >>

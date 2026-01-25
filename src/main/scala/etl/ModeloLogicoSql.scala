@@ -3,12 +3,41 @@ package etl
 object ModeloLogicoSql {
 
   def generarDDL: String =
-    """-- =============================================================
+    """
+      |-- =============================================================
+      |-- DROP DE TODAS LAS TABLAS DEL MODELO NORMALIZADO
+      |-- =============================================================
+      |
+      |SET FOREIGN_KEY_CHECKS = 0;
+      |
+      |-- Primero eliminar tablas puente (relaciones)
+      |DROP TABLE IF EXISTS movie_cast;
+      |DROP TABLE IF EXISTS movie_crew;
+      |DROP TABLE IF EXISTS movie_keywords;
+      |DROP TABLE IF EXISTS movie_collections;
+      |DROP TABLE IF EXISTS movie_spoken_languages;
+      |DROP TABLE IF EXISTS movie_production_countries;
+      |DROP TABLE IF EXISTS movie_production_companies;
+      |DROP TABLE IF EXISTS movie_genres;
+      |
+      |-- Luego eliminar tablas principales y catálogos
+      |DROP TABLE IF EXISTS movies;
+      |DROP TABLE IF EXISTS cast_members;
+      |DROP TABLE IF EXISTS crew_members;
+      |DROP TABLE IF EXISTS keywords;
+      |DROP TABLE IF EXISTS collections;
+      |DROP TABLE IF EXISTS spoken_languages;
+      |DROP TABLE IF EXISTS production_countries;
+      |DROP TABLE IF EXISTS production_companies;
+      |DROP TABLE IF EXISTS genres;
+      |
+      |-- También eliminar la tabla staging si quieres limpiar todo
+      |DROP TABLE IF EXISTS movies_clean;
+      |
+      |SET FOREIGN_KEY_CHECKS = 1;
+      |-- =============================================================
       |-- MODELO LOGICO NORMALIZADO (DDL)
       |-- =============================================================
-      |-- Este script crea tablas normalizadas.
-      |-- Los campos JSON (genres, production_companies, etc.) se
-      |-- separan en tablas catálogo con relaciones N:M.
       |
       |SET FOREIGN_KEY_CHECKS = 0;
       |
@@ -49,15 +78,34 @@ object ModeloLogicoSql {
       |) ENGINE=InnoDB;
       |
       |-- =============================================================
-      |-- TABLA PRINCIPAL: MOVIES (SIN CAMPOS JSON)
+      |-- TABLAS DE CAST Y CREW - EXACTAMENTE COMO EN EL JSON
       |-- =============================================================
-      |-- Nota: Los campos JSON originales (genres, production_companies, etc.)
-      |-- se eliminan porque ahora están normalizados en tablas separadas.
+      |
+      |CREATE TABLE IF NOT EXISTS cast_members (
+      |  cast_id BIGINT PRIMARY KEY,
+      |  character_name LONGTEXT,
+      |  credit_id VARCHAR(100),
+      |  gender INT,
+      |  name LONGTEXT,
+      |  cast_order INT,
+      |  profile_path LONGTEXT
+      |) ENGINE=InnoDB;
+      |
+      |CREATE TABLE IF NOT EXISTS crew_members (
+      |  credit_id VARCHAR(100) PRIMARY KEY,
+      |  department LONGTEXT,
+      |  gender INT,
+      |  job LONGTEXT,
+      |  name LONGTEXT,
+      |  profile_path LONGTEXT
+      |) ENGINE=InnoDB;
+      |
+      |-- =============================================================
+      |-- TABLA PRINCIPAL: MOVIES
+      |-- =============================================================
       |
       |CREATE TABLE IF NOT EXISTS movies (
       |  id BIGINT PRIMARY KEY,
-      |
-      |  -- Campos escalares
       |  adult VARCHAR(10),
       |  budget DOUBLE,
       |  homepage LONGTEXT,
@@ -76,8 +124,6 @@ object ModeloLogicoSql {
       |  video VARCHAR(10),
       |  vote_average DOUBLE,
       |  vote_count DOUBLE,
-      |
-      |  -- Campos calculados
       |  release_year INT,
       |  release_month INT,
       |  release_day INT,
@@ -92,85 +138,66 @@ object ModeloLogicoSql {
       |  movie_id BIGINT NOT NULL,
       |  genre_id BIGINT NOT NULL,
       |  PRIMARY KEY (movie_id, genre_id),
-      |  CONSTRAINT fk_movie_genres_movie
-      |    FOREIGN KEY (movie_id) REFERENCES movies(id)
-      |    ON DELETE CASCADE,
-      |  CONSTRAINT fk_movie_genres_genre
-      |    FOREIGN KEY (genre_id) REFERENCES genres(genre_id)
-      |    ON DELETE RESTRICT
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (genre_id) REFERENCES genres(genre_id) ON DELETE RESTRICT
       |) ENGINE=InnoDB;
       |
       |CREATE TABLE IF NOT EXISTS movie_production_companies (
       |  movie_id BIGINT NOT NULL,
       |  company_id BIGINT NOT NULL,
       |  PRIMARY KEY (movie_id, company_id),
-      |  CONSTRAINT fk_movie_companies_movie
-      |    FOREIGN KEY (movie_id) REFERENCES movies(id)
-      |    ON DELETE CASCADE,
-      |  CONSTRAINT fk_movie_companies_company
-      |    FOREIGN KEY (company_id) REFERENCES production_companies(company_id)
-      |    ON DELETE RESTRICT
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (company_id) REFERENCES production_companies(company_id) ON DELETE RESTRICT
       |) ENGINE=InnoDB;
       |
       |CREATE TABLE IF NOT EXISTS movie_production_countries (
       |  movie_id BIGINT NOT NULL,
       |  iso_3166_1 VARCHAR(10) NOT NULL,
       |  PRIMARY KEY (movie_id, iso_3166_1),
-      |  CONSTRAINT fk_movie_countries_movie
-      |    FOREIGN KEY (movie_id) REFERENCES movies(id)
-      |    ON DELETE CASCADE,
-      |  CONSTRAINT fk_movie_countries_country
-      |    FOREIGN KEY (iso_3166_1) REFERENCES production_countries(iso_3166_1)
-      |    ON DELETE RESTRICT
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (iso_3166_1) REFERENCES production_countries(iso_3166_1) ON DELETE RESTRICT
       |) ENGINE=InnoDB;
       |
       |CREATE TABLE IF NOT EXISTS movie_spoken_languages (
       |  movie_id BIGINT NOT NULL,
       |  iso_639_1 VARCHAR(10) NOT NULL,
       |  PRIMARY KEY (movie_id, iso_639_1),
-      |  CONSTRAINT fk_movie_languages_movie
-      |    FOREIGN KEY (movie_id) REFERENCES movies(id)
-      |    ON DELETE CASCADE,
-      |  CONSTRAINT fk_movie_languages_language
-      |    FOREIGN KEY (iso_639_1) REFERENCES spoken_languages(iso_639_1)
-      |    ON DELETE RESTRICT
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (iso_639_1) REFERENCES spoken_languages(iso_639_1) ON DELETE RESTRICT
       |) ENGINE=InnoDB;
       |
       |CREATE TABLE IF NOT EXISTS movie_collections (
       |  movie_id BIGINT NOT NULL,
       |  collection_id BIGINT NOT NULL,
       |  PRIMARY KEY (movie_id, collection_id),
-      |  CONSTRAINT fk_movie_collections_movie
-      |    FOREIGN KEY (movie_id) REFERENCES movies(id)
-      |    ON DELETE CASCADE,
-      |  CONSTRAINT fk_movie_collections_collection
-      |    FOREIGN KEY (collection_id) REFERENCES collections(collection_id)
-      |    ON DELETE RESTRICT
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE RESTRICT
       |) ENGINE=InnoDB;
       |
       |CREATE TABLE IF NOT EXISTS movie_keywords (
       |  movie_id BIGINT NOT NULL,
       |  keyword_id BIGINT NOT NULL,
       |  PRIMARY KEY (movie_id, keyword_id),
-      |  CONSTRAINT fk_movie_keywords_movie
-      |    FOREIGN KEY (movie_id) REFERENCES movies(id)
-      |    ON DELETE CASCADE,
-      |  CONSTRAINT fk_movie_keywords_keyword
-      |    FOREIGN KEY (keyword_id) REFERENCES keywords(keyword_id)
-      |    ON DELETE RESTRICT
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (keyword_id) REFERENCES keywords(keyword_id) ON DELETE RESTRICT
+      |) ENGINE=InnoDB;
+      |
+      |CREATE TABLE IF NOT EXISTS movie_cast (
+      |  movie_id BIGINT NOT NULL,
+      |  cast_id BIGINT NOT NULL,
+      |  PRIMARY KEY (movie_id, cast_id),
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (cast_id) REFERENCES cast_members(cast_id) ON DELETE RESTRICT
+      |) ENGINE=InnoDB;
+      |
+      |CREATE TABLE IF NOT EXISTS movie_crew (
+      |  movie_id BIGINT NOT NULL,
+      |  credit_id VARCHAR(100) NOT NULL,
+      |  PRIMARY KEY (movie_id, credit_id),
+      |  FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+      |  FOREIGN KEY (credit_id) REFERENCES crew_members(credit_id) ON DELETE RESTRICT
       |) ENGINE=InnoDB;
       |
       |SET FOREIGN_KEY_CHECKS = 1;
-      |
-      |-- =============================================================
-      |-- NOTAS IMPORTANTES:
-      |-- =============================================================
-      |-- 1. La tabla 'movies' NO contiene campos JSON (genres, production_companies, etc.)
-      |-- 2. Esos datos ahora están en tablas separadas con relaciones N:M
-      |-- 3. Para obtener todos los géneros de una película:
-      |--    SELECT g.* FROM genres g
-      |--    JOIN movie_genres mg ON g.genre_id = mg.genre_id
-      |--    WHERE mg.movie_id = ?
-      |-- 4. Este modelo se puebla automáticamente ejecutando la opción [5] del menú
       |""".stripMargin
 }

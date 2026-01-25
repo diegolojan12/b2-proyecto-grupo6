@@ -61,17 +61,17 @@ object DiagnosticoETL extends IOApp.Simple {
         IO.println("\n" + "=" * 80) >>
           IO.println("                    DIAGNÓSTICO DEL ETL") >>
           IO.println("=" * 80) >>
-          IO.println("\n📊 TABLAS PRINCIPALES:") >>
+          IO.println("\nTABLAS PRINCIPALES:") >>
           IO.println(f"  movies_clean (staging):        ${moviesClean}%,10d registros") >>
           IO.println(f"  movies (normalizada):          ${movies}%,10d registros") >>
-          IO.println("\n📚 TABLAS CATÁLOGO:") >>
+          IO.println("\nTABLAS CATÁLOGO:") >>
           IO.println(f"  genres:                        ${genres}%,10d registros") >>
           IO.println(f"  production_companies:          ${companies}%,10d registros") >>
           IO.println(f"  production_countries:          ${countries}%,10d registros") >>
           IO.println(f"  spoken_languages:              ${languages}%,10d registros") >>
           IO.println(f"  collections:                   ${collections}%,10d registros") >>
           IO.println(f"  keywords:                      ${keywords}%,10d registros") >>
-          IO.println("\n🔗 TABLAS PUENTE (RELACIONES):") >>
+          IO.println("\nTABLAS PUENTE (RELACIONES):") >>
           IO.println(f"  movie_genres:                  ${mvGenres}%,10d relaciones") >>
           IO.println(f"  movie_production_companies:    ${mvCompanies}%,10d relaciones") >>
           IO.println(f"  movie_production_countries:    ${mvCountries}%,10d relaciones") >>
@@ -80,18 +80,18 @@ object DiagnosticoETL extends IOApp.Simple {
           IO.println("\n" + "=" * 80) >>
           {
             if (moviesClean > 0 && movies == 0) {
-              IO.println("\n⚠️  PROBLEMA DETECTADO:") >>
+              IO.println("\n️  PROBLEMA DETECTADO:") >>
                 IO.println("  • movies_clean tiene datos pero movies está vacía") >>
                 IO.println("  • El ETL normalizado NO se está ejecutando correctamente") >>
-                IO.println("\n💡 SOLUCIÓN:") >>
+                IO.println("\n SOLUCIÓN:") >>
                 IO.println("  1. Verifica que ModeloNormalizadoEtl.scala esté actualizado") >>
                 IO.println("  2. Verifica los logs de errores durante la carga") >>
                 IO.println("  3. Ejecuta la opción [5] del menú nuevamente") >>
-                IO.println("\n🔍 EJEMPLOS DE DATOS EN movies_clean:") >>
+                IO.println("\nEJEMPLOS DE DATOS EN movies_clean:") >>
                 IO.println("  (Ejecuta en MySQL para ver el contenido)") >>
                 IO.println("  SELECT id, title, genres, production_companies FROM movies_clean LIMIT 3;")
             } else if (movies > 0 && genres == 0) {
-              IO.println("\n⚠️  PROBLEMA DETECTADO:") >>
+              IO.println("\n⚠ PROBLEMA DETECTADO:") >>
                 IO.println("  • movies tiene datos pero las tablas catálogo están vacías") >>
                 IO.println("  • El parseo de JSON NO está funcionando") >>
                 IO.println("\nMOSTRANDO EJEMPLO DE MOVIES:") >>

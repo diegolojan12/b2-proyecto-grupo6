@@ -56,9 +56,11 @@ object Transformador:
       release_year = year,
       release_month = month,
       release_day = day,
-      `return` = roi
+      `return` = roi,
+      keywords = raw.keywords, // ← NUEVO
+      cast = raw.cast, // ← NUEVO
+      crew = raw.crew // ← NUEVO
     )
-
 
 import models.CalidadColumna
 
@@ -103,63 +105,92 @@ object Decoders:
 import models.Movie
 
 object Limpiador:
-  // Paso 1: Eliminar valores nulos y ceros en columnas críticas
+  // Función auxiliar para normalizar strings vacíos
+  private def normalizarString(s: String): String =
+    if (s == null || s.trim.isEmpty) "null" else s.trim
+
+  // Función para validar y corregir fechas
+  private def validarFecha(fecha: String): String = {
+    if (fecha == null || fecha.trim.isEmpty) return "null"
+
+    try {
+      // Intentar parsear la fecha en formato YYYY-MM-DD
+      val partes = fecha.trim.split("-")
+      if (partes.length == 3) {
+        val year = partes(0).toInt
+        val month = partes(1).toInt
+        val day = partes(2).toInt
+
+        // Validar rangos
+        if (year < 1888 || year > 2025) return "null"
+        if (month < 1 || month > 12) return "null"
+        if (day < 1 || day > 31) return "null"
+
+        // Retornar en formato correcto YYYY-MM-DD
+        f"$year%04d-$month%02d-$day%02d"
+      } else {
+        "null"
+      }
+    } catch {
+      case _: Exception => "null"
+    }
+  }
+
+  // Paso 1: Normalizar valores (NO eliminar registros)
   def eliminarValoresNulos(peliculas: List[Movie]): List[Movie] =
-    peliculas.filter { m =>
-      m.id > 0 &&
-        m.budget > 0 &&
-        m.revenue > 0 &&
-        m.runtime > 0 &&
-        m.popularity > 0 &&
-        m.vote_count > 0 &&
-        !m.title.trim.isEmpty &&
-        !m.original_title.trim.isEmpty
+    peliculas.map { m =>
+      m.copy(
+        adult = normalizarString(m.adult),
+        belongs_to_collection = normalizarString(m.belongs_to_collection),
+        genres = normalizarString(m.genres),
+        homepage = normalizarString(m.homepage),
+        imdb_id = normalizarString(m.imdb_id),
+        original_language = normalizarString(m.original_language),
+        original_title = normalizarString(m.original_title),
+        overview = normalizarString(m.overview),
+        poster_path = normalizarString(m.poster_path),
+        production_companies = normalizarString(m.production_companies),
+        production_countries = normalizarString(m.production_countries),
+        release_date = validarFecha(m.release_date), // ← APLICAR VALIDACIÓN DE FECHA
+        spoken_languages = normalizarString(m.spoken_languages),
+        status = normalizarString(m.status),
+        tagline = normalizarString(m.tagline),
+        title = normalizarString(m.title),
+        video = normalizarString(m.video),
+        keywords = normalizarString(m.keywords),
+        cast = normalizarString(m.cast),
+        crew = normalizarString(m.crew),
+        budget = if (m.budget < 0) 0.0 else m.budget,
+        revenue = if (m.revenue < 0) 0.0 else m.revenue,
+        runtime = if (m.runtime < 0) 0.0 else m.runtime,
+        popularity = if (m.popularity < 0) 0.0 else m.popularity,
+        vote_count = if (m.vote_count < 0) 0.0 else m.vote_count,
+        vote_average = if (m.vote_average < 0) 0.0 else m.vote_average
+      )
     }
 
-  // Paso 2: Validar rangos lógicos
+  // Paso 2: Normalizar valores fuera de rango
   def validarRangos(peliculas: List[Movie]): List[Movie] =
-    peliculas.filter { m =>
-      m.release_year >= 1888 && m.release_year <= 2025 &&
-        m.release_month >= 1 && m.release_month <= 12 &&
-        m.release_day >= 1 && m.release_day <= 31 &&
-        m.runtime < 500 && // Películas extremadamente largas
-        m.vote_average >= 0 && m.vote_average <= 10 &&
-        m.`return` >= -1.0 // ROI no puede ser menor a -100%
+    peliculas.map { m =>
+      m.copy(
+        release_year = if (m.release_year < 1888 || m.release_year > 2025) 0.0 else m.release_year,
+        release_month = if (m.release_month < 1 || m.release_month > 12) 0.0 else m.release_month,
+        release_day = if (m.release_day < 1 || m.release_day > 31) 0.0 else m.release_day,
+        runtime = if (m.runtime > 500) 0.0 else m.runtime,
+        vote_average = if (m.vote_average < 0 || m.vote_average > 10) 0.0 else m.vote_average,
+        `return` = if (m.`return` < -1.0) 0.0 else m.`return`
+      )
     }
 
-  // Paso 3: Filtrar outliers usando IQR
+  // Paso 3: NO filtrar outliers (mantener todo)
   def filtrarOutliersIQR(peliculas: List[Movie]): List[Movie] =
-    if (peliculas.isEmpty) return Nil
+    peliculas
 
-    val (bLow, bHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.budget))
-    val (rLow, rHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.revenue))
-    val (pLow, pHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.popularity))
-
-    peliculas.filter { m =>
-      m.budget >= bLow && m.budget <= bHigh &&
-        m.revenue >= rLow && m.revenue <= rHigh &&
-        m.popularity >= pLow && m.popularity <= pHigh
-    }
-
-  // Método flexible: permite 1 outlier por registro
+  // Método flexible: NO filtrar, solo devolver todo
   def filtrarOutliersFlexible(peliculas: List[Movie]): List[Movie] =
-    if (peliculas.isEmpty) return Nil
+    peliculas
 
-    val (bLow, bHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.budget))
-    val (rLow, rHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.revenue))
-    val (pLow, pHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.popularity))
-    val (retLow, retHigh, _, _) = DetectorOutliers.detectarOutliersIQR(peliculas.map(_.`return`))
 
-    peliculas.filter { m =>
-      val fueraDeRango = Seq(
-        m.budget < bLow || m.budget > bHigh,
-        m.revenue < rLow || m.revenue > rHigh,
-        m.popularity < pLow || m.popularity > pHigh,
-        m.`return` < retLow || m.`return` > retHigh
-      ).count(identity)
-
-      fueraDeRango < 2 // Permite 1 outlier
-    }
 
 object DetectorOutliers:
   // Detección de outliers usando método IQR

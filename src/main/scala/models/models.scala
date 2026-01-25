@@ -131,7 +131,10 @@ case class Movie(
                   release_year: Double,
                   release_month: Double,
                   release_day: Double,
-                  `return`: Double
+                  `return`: Double,
+                  keywords: String,      // ← NUEVO
+                  cast: String,          // ← NUEVO
+                  crew: String           // ← NUEVO
                 )
 
 case class MovieNumeric(
@@ -168,7 +171,10 @@ case class MovieRaw(
                      title: String,
                      video: String,
                      vote_average: Double,
-                     vote_count: Double
+                     vote_count: Double,
+                     keywords: String,      // ← NUEVO
+                     cast: String,          // ← NUEVO
+                     crew: String           // ← NUEVO
                    )
 
 case class MovieText(

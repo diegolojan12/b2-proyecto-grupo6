@@ -115,14 +115,14 @@ object EtlCompleto extends IOApp.Simple {
                     IO.println("║                     ✓ ETL COMPLETADO EXITOSAMENTE              ║") >>
                     IO.println("╚═══════════════════════════════════════════════════════════════╝") >>
                     IO.println(s"\n  Total de registros cargados: ${datosLimpios.length}") >>
-                    IO.println(s"\n  📊 TABLAS CARGADAS:") >>
+                    IO.println(s"\n   TABLAS CARGADAS:") >>
                     IO.println(s"     • movies_clean (staging)") >>
                     IO.println(s"     • movies (normalizada)") >>
                     IO.println(s"     • collections, genres, production_companies") >>
                     IO.println(s"     • production_countries, spoken_languages") >>
                     IO.println(s"     • keywords, cast_members, crew_members") >>
                     IO.println(s"     • Todas las tablas puente (movie_*)") >>
-                    IO.println(s"\n  📁 ARCHIVOS SQL:") >>
+                    IO.println(s"\n   ARCHIVOS SQL:") >>
                     IO.println(s"     • $sqlOutputLimpio") >>
                     IO.println(s"     • $sqlOutputModeloLogico") >>
                     IO.println("\n  Use la opción [6] del menú para consultar estadísticas.\n")

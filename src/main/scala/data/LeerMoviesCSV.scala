@@ -53,10 +53,13 @@ object LeerMoviesCSV extends App {
       .replaceAll("True", "true")
       .replaceAll("False", "false")
       .replaceAll("""\\""", "")
+      .replaceAll("""\\x[0-9a-fA-F]{2}""", "") // ← NUEVO: Remover secuencias hex
+      .replaceAll("""[\u0000-\u001F]""", "") // ← NUEVO: Remover caracteres de control
+      .replaceAll("[\r\n]+", " ") // ← NUEVO: Normalizar saltos de línea
   }
 
   def normalizarTexto(texto: String): Option[String] = {
-    val limpio = texto.trim.replaceAll("\\s+", " ")
+    val limpio = texto.trim.replaceAll("\\s+", " ").replaceAll("[\r\n]+", " ")
     if (limpio.isEmpty) None else Some(limpio)
   }
 
